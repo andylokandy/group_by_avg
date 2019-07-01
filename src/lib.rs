@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::thread;
 
 pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
-    let num = num_cpus::get();
-    let num = if pairs.len() < num { pairs.len() } else { num };
+    let num = num_cpus::get().min(pairs.len());
 
     let handles: Vec<_> = (0..num)
         .map(|i| {
