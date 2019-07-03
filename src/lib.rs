@@ -21,6 +21,7 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
     let small_group_plan_threads = num;
     let large_group_plan_threads = num;
 
+    // the plan carries the payload for each thread
     let mut small_group_plan: Vec<Vec<(i64, i64)>> = iter::repeat(Vec::new())
         .take(small_group_plan_threads)
         .collect();
@@ -29,15 +30,21 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
         .collect();
 
     let mut large_pair_count = 0;
+
+    // plan the tasks
     for pair in pairs {
         if large_groups.contains(&pair.0) {
+            // dispatch the pairs of large group evenly into tasks
             large_group_plan[large_pair_count % large_group_plan_threads].push(*pair);
             large_pair_count += 1;
         } else {
+            // dispatch the pairs of small group by theirs keys,
+            // this makes no key overlap between small group tasks
             small_group_plan[pair.0 as usize % small_group_plan_threads].push(*pair);
         }
     }
 
+    // execute the plans
     let (tx, rx) = channel::<Message>();
     let pool = ThreadPool::new(num);
 
@@ -64,12 +71,15 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
         let msg = rx.recv().unwrap();
         match msg {
             Message::SmallGroupResult(map) => {
+                // small group results can be directly collected
+                // since there is no key overlap between tasks
                 collector.extend(map.into_iter());
             }
             Message::LargeGroupResult(map) => {
-                // merge results from all worker threads
+                // merge results from large group tasks
                 for (k, v) in map {
-                    let &mut (ref mut count, ref mut sum) = large_group_collector.entry(k).or_insert((0, 0));
+                    let &mut (ref mut count, ref mut sum) =
+                        large_group_collector.entry(k).or_insert((0, 0));
                     *count += v.0;
                     *sum += v.1;
                 }
@@ -86,6 +96,7 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
         .collect()
 }
 
+/// aggregate the pairs into (k) -> (count, sum)
 fn group_count_sum(pairs: &[(i64, i64)]) -> HashMap<i64, (i64, i64)> {
     let mut map = HashMap::new();
 
@@ -101,6 +112,7 @@ fn group_count_sum(pairs: &[(i64, i64)]) -> HashMap<i64, (i64, i64)> {
 const SAMPLES_COUNT: usize = 100;
 const SAMPLES_THRESHOLD: usize = 5;
 
+/// Detect the groups with large number of records
 fn detect_large_groups(pairs: &[(i64, i64)]) -> Vec<i64> {
     let len = pairs.len();
 
