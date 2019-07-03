@@ -34,11 +34,11 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
     // plan the tasks
     for pair in pairs {
         if large_groups.contains(&pair.0) {
-            // dispatch the pairs of large group evenly into tasks
+            // dispatch the pairs of large groups evenly into large group tasks
             large_group_plan[large_pair_count % large_group_plan_threads].push(*pair);
             large_pair_count += 1;
         } else {
-            // dispatch the pairs of small group by theirs keys,
+            // dispatch the pairs of small groups by theirs keys,
             // this makes no key overlap between small group tasks
             small_group_plan[pair.0 as usize % small_group_plan_threads].push(*pair);
         }
@@ -64,6 +64,7 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
         });
     }
 
+    // collect the results
     let mut collector: Vec<(i64, (i64, i64))> = Vec::new();
     let mut large_group_collector: HashMap<i64, (i64, i64)> = HashMap::new();
 
@@ -71,7 +72,7 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
         let msg = rx.recv().unwrap();
         match msg {
             Message::SmallGroupResult(map) => {
-                // small group results can be directly collected
+                // small group results can be collected directly
                 // since there is no key overlap between tasks
                 collector.extend(map.into_iter());
             }
@@ -89,7 +90,7 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
 
     collector.extend(large_group_collector.into_iter());
 
-    // calc the avg
+    // calculate the avg
     collector
         .into_iter()
         .map(|(k, (count, sum))| (k, sum as f64 / count as f64))
