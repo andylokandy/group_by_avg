@@ -4,9 +4,19 @@ use std::iter;
 use std::sync::mpsc::channel;
 use threadpool::ThreadPool;
 
+struct CountSum(pub i64, pub i64);
+
+impl CountSum {
+    fn avg(&self) -> f64 {
+        let CountSum(count, sum) = self;
+        *sum as f64 / *count as f64
+    }
+}
+
+/// Channel message to return results from worker threads
 enum Message {
-    SmallGroupResult(HashMap<i64, (i64, i64)>),
-    LargeGroupResult(HashMap<i64, (i64, i64)>),
+    SmallGroupResult(HashMap<i64, CountSum>),
+    LargeGroupResult(HashMap<i64, CountSum>),
 }
 
 pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
@@ -65,22 +75,22 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
     }
 
     // collect the results
-    let mut collector: Vec<(i64, (i64, i64))> = Vec::new();
-    let mut large_group_collector: HashMap<i64, (i64, i64)> = HashMap::new();
+    let mut collector: Vec<(i64, CountSum)> = Vec::new();
+    let mut large_group_collector: HashMap<i64, CountSum> = HashMap::new();
 
     for _ in 0..(small_group_plan_threads + large_group_plan_threads) {
         let msg = rx.recv().unwrap();
         match msg {
             Message::SmallGroupResult(map) => {
-                // small group results can be collected directly
+                // small group results can directly be collected
                 // since there is no key overlap between tasks
                 collector.extend(map.into_iter());
             }
             Message::LargeGroupResult(map) => {
                 // merge results from large group tasks
                 for (k, v) in map {
-                    let &mut (ref mut count, ref mut sum) =
-                        large_group_collector.entry(k).or_insert((0, 0));
+                    let CountSum(ref mut count, ref mut sum) =
+                        large_group_collector.entry(k).or_insert(CountSum(0, 0));
                     *count += v.0;
                     *sum += v.1;
                 }
@@ -91,18 +101,15 @@ pub fn group_by_avg(pairs: &[(i64, i64)]) -> Vec<(i64, f64)> {
     collector.extend(large_group_collector.into_iter());
 
     // calculate the avg
-    collector
-        .into_iter()
-        .map(|(k, (count, sum))| (k, sum as f64 / count as f64))
-        .collect()
+    collector.into_iter().map(|(k, v)| (k, v.avg())).collect()
 }
 
-/// aggregate the pairs into (k) -> (count, sum)
-fn group_count_sum(pairs: &[(i64, i64)]) -> HashMap<i64, (i64, i64)> {
+/// Aggregates the pairs into (k) -> (count, sum)
+fn group_count_sum(pairs: &[(i64, i64)]) -> HashMap<i64, CountSum> {
     let mut map = HashMap::new();
 
     for (k, v) in pairs {
-        let &mut (ref mut count, ref mut sum) = map.entry(*k).or_insert((0, 0));
+        let CountSum(ref mut count, ref mut sum) = map.entry(*k).or_insert(CountSum(0, 0));
         *count += 1;
         *sum += v;
     }
@@ -113,13 +120,12 @@ fn group_count_sum(pairs: &[(i64, i64)]) -> HashMap<i64, (i64, i64)> {
 const SAMPLES_COUNT: usize = 100;
 const SAMPLES_THRESHOLD: usize = 5;
 
-/// Detect the groups with large number of records
+/// Detect the groups with large number of records.
+/// This method detects the large group by random sampling,
+/// if a group has `SAMPLES_THRESHOLD / SAMPLES_COUNT`
+/// of the records, the group is considered as a large group.
 fn detect_large_groups(pairs: &[(i64, i64)]) -> Vec<i64> {
     let len = pairs.len();
-
-    // if len < num_cpus::get() * 100 {
-    //     return Vec::new();
-    // }
 
     let mut rng = thread_rng();
     let mut samples: HashMap<i64, usize> = HashMap::new();

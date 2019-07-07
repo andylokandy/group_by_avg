@@ -7,7 +7,7 @@ fn main() -> Result<(), io::Error> {
     let mut buf = String::new();
     let mut file = File::open("examples/data.txt")?;
     file.read_to_string(&mut buf)?;
-    
+
     let paris: Vec<(i64, i64)> = buf
         .lines()
         .map(|line| {
@@ -16,8 +16,7 @@ fn main() -> Result<(), io::Error> {
                 iter.next().unwrap().parse().unwrap(),
                 iter.next().unwrap().parse().unwrap(),
             )
-        })
-        .collect();
+        }).collect();
 
     let results = group_by_avg(&paris);
 
